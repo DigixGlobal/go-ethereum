@@ -15,22 +15,22 @@ import (
 )
 
 const (
-	defaultDialTimeout      = 15 * time.Second
-	refreshPeersInterval    = 30 * time.Second
-	staticPeerCheckInterval = 15 * time.Second
+	defaultDialTimeout      = 3 * time.Second
+	refreshPeersInterval    = 15 * time.Second
+	staticPeerCheckInterval = 5 * time.Second
 
 	// Maximum number of concurrently handshaking inbound connections.
 	maxAcceptConns = 50
 
 	// Maximum number of concurrently dialing outbound connections.
-	maxActiveDialTasks = 16
+	maxActiveDialTasks = 60
 
 	// Maximum time allowed for reading a complete message.
 	// This is effectively the amount of time a connection can be idle.
-	frameReadTimeout = 30 * time.Second
+	frameReadTimeout = 12 * time.Second
 
 	// Maximum amount of time allowed for writing a complete message.
-	frameWriteTimeout = 20 * time.Second
+	frameWriteTimeout = 12 * time.Second
 )
 
 var errServerStopped = errors.New("server stopped")

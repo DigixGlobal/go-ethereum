@@ -333,6 +333,7 @@ func newStoppableTCPListener(addr string) (*stoppableTCPListener, error) {
 
 	if tcpl, ok := wl.(*net.TCPListener); ok {
 		stop := make(chan struct{})
+		tcpl.SetDeadline(time.Now().Add(time.Second * 5))
 		l := &stoppableTCPListener{tcpl, stop}
 		return l, nil
 	}
