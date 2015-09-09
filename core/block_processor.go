@@ -56,6 +56,18 @@ type BlockProcessor struct {
 	eventMux *event.TypeMux
 }
 
+// TODO: type GasPool big.Int
+//
+// GasPool is implemented by state.StateObject. This is a historical
+// coincidence. Gas tracking should move out of StateObject.
+
+// GasPool tracks the amount of gas available during
+// execution of the transactions in a block.
+type GasPool interface {
+	AddGas(gas, price *big.Int)
+	SubGas(gas, price *big.Int) error
+}
+
 func NewBlockProcessor(db common.Database, pow pow.PoW, chainManager *ChainManager, eventMux *event.TypeMux) *BlockProcessor {
 	sm := &BlockProcessor{
 		chainDb:  db,
@@ -64,16 +76,15 @@ func NewBlockProcessor(db common.Database, pow pow.PoW, chainManager *ChainManag
 		bc:       chainManager,
 		eventMux: eventMux,
 	}
-
 	return sm
 }
 
 func (sm *BlockProcessor) TransitionState(statedb *state.StateDB, parent, block *types.Block, transientProcess bool) (receipts types.Receipts, err error) {
-	coinbase := statedb.GetOrNewStateObject(block.Coinbase())
-	coinbase.SetGasLimit(block.GasLimit())
+	gp := statedb.GetOrNewStateObject(block.Coinbase())
+	gp.SetGasLimit(block.GasLimit())
 
 	// Process the transactions on to parent state
-	receipts, err = sm.ApplyTransactions(coinbase, statedb, block, block.Transactions(), transientProcess)
+	receipts, err = sm.ApplyTransactions(gp, statedb, block, block.Transactions(), transientProcess)
 	if err != nil {
 		return nil, err
 	}
@@ -81,9 +92,8 @@ func (sm *BlockProcessor) TransitionState(statedb *state.StateDB, parent, block 
 	return receipts, nil
 }
 
-func (self *BlockProcessor) ApplyTransaction(coinbase *state.StateObject, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *big.Int, transientProcess bool) (*types.Receipt, *big.Int, error) {
-	cb := statedb.GetStateObject(coinbase.Address())
-	_, gas, err := ApplyMessage(NewEnv(statedb, self.bc, tx, header), tx, cb)
+func (self *BlockProcessor) ApplyTransaction(gp GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *big.Int, transientProcess bool) (*types.Receipt, *big.Int, error) {
+	_, gas, err := ApplyMessage(NewEnv(statedb, self.bc, tx, header), tx, gp)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -118,7 +128,7 @@ func (self *BlockProcessor) ChainManager() *ChainManager {
 	return self.bc
 }
 
-func (self *BlockProcessor) ApplyTransactions(coinbase *state.StateObject, statedb *state.StateDB, block *types.Block, txs types.Transactions, transientProcess bool) (types.Receipts, error) {
+func (self *BlockProcessor) ApplyTransactions(gp GasPool, statedb *state.StateDB, block *types.Block, txs types.Transactions, transientProcess bool) (types.Receipts, error) {
 	var (
 		receipts      types.Receipts
 		totalUsedGas  = big.NewInt(0)
@@ -130,7 +140,7 @@ func (self *BlockProcessor) ApplyTransactions(coinbase *state.StateObject, state
 	for i, tx := range txs {
 		statedb.StartRecord(tx.Hash(), block.Hash(), i)
 
-		receipt, txGas, err := self.ApplyTransaction(coinbase, statedb, header, tx, totalUsedGas, transientProcess)
+		receipt, txGas, err := self.ApplyTransaction(gp, statedb, header, tx, totalUsedGas, transientProcess)
 		if err != nil {
 			return nil, err
 		}
@@ -203,7 +213,7 @@ func (sm *BlockProcessor) processWithParent(block, parent *types.Block) (logs st
 	txs := block.Transactions()
 
 	// Block validation
-	if err = ValidateHeader(sm.Pow, header, parent, false); err != nil {
+	if err = ValidateHeader(sm.Pow, header, parent, false, false); err != nil {
 		return
 	}
 
@@ -327,7 +337,7 @@ func (sm *BlockProcessor) VerifyUncles(statedb *state.StateDB, block, parent *ty
 			return UncleError("uncle[%d](%x)'s parent is not ancestor (%x)", i, hash[:4], uncle.ParentHash[0:4])
 		}
 
-		if err := ValidateHeader(sm.Pow, uncle, ancestors[uncle.ParentHash], true); err != nil {
+		if err := ValidateHeader(sm.Pow, uncle, ancestors[uncle.ParentHash], true, true); err != nil {
 			return ValidationError(fmt.Sprintf("uncle[%d](%x) header invalid: %v", i, hash[:4], err))
 		}
 	}
@@ -358,19 +368,25 @@ func (sm *BlockProcessor) GetLogs(block *types.Block) (logs state.Logs, err erro
 
 // See YP section 4.3.4. "Block Header Validity"
 // Validates a block. Returns an error if the block is invalid.
-func ValidateHeader(pow pow.PoW, block *types.Header, parent *types.Block, checkPow bool) error {
+func ValidateHeader(pow pow.PoW, block *types.Header, parent *types.Block, checkPow, uncle bool) error {
 	if big.NewInt(int64(len(block.Extra))).Cmp(params.MaximumExtraDataSize) == 1 {
 		return fmt.Errorf("Block extra data too long (%d)", len(block.Extra))
 	}
 
-	if block.Time > uint64(time.Now().Unix()) {
-		return BlockFutureErr
+	if uncle {
+		if block.Time.Cmp(common.MaxBig) == 1 {
+			return BlockTSTooBigErr
+		}
+	} else {
+		if block.Time.Cmp(big.NewInt(time.Now().Unix())) == 1 {
+			return BlockFutureErr
+		}
 	}
-	if block.Time <= parent.Time() {
+	if block.Time.Cmp(parent.Time()) != 1 {
 		return BlockEqualTSErr
 	}
 
-	expd := CalcDifficulty(block.Time, parent.Time(), parent.Number(), parent.Difficulty())
+	expd := CalcDifficulty(block.Time.Uint64(), parent.Time().Uint64(), parent.Number(), parent.Difficulty())
 	if expd.Cmp(block.Difficulty) != 0 {
 		return fmt.Errorf("Difficulty check failed for block %v, %v", block.Difficulty, expd)
 	}
