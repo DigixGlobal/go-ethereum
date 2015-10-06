@@ -14,29 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package trie
+/*
+Package vm implements the Ethereum Virtual Machine.
 
-import "github.com/ethereum/go-ethereum/common"
+The vm package implements two EVMs, a byte code VM and a JIT VM. The BC
+(Byte Code) VM loops over a set of bytes and executes them according to the set
+of rules defined in the Ethereum yellow paper. When the BC VM is invoked it
+invokes the JIT VM in a seperate goroutine and compiles the byte code in JIT
+instructions.
 
-type ValueNode struct {
-	trie  *Trie
-	data  []byte
-	dirty bool
-}
-
-func NewValueNode(trie *Trie, data []byte) *ValueNode {
-	return &ValueNode{trie, data, false}
-}
-
-func (self *ValueNode) Value() Node { return self } // Best not to call :-)
-func (self *ValueNode) Val() []byte { return self.data }
-func (self *ValueNode) Dirty() bool { return self.dirty }
-func (self *ValueNode) Copy(t *Trie) Node {
-	return &ValueNode{t, common.CopyBytes(self.data), self.dirty}
-}
-func (self *ValueNode) RlpData() interface{} { return self.data }
-func (self *ValueNode) Hash() interface{}    { return self.data }
-
-func (self *ValueNode) setDirty(dirty bool) {
-	self.dirty = dirty
-}
+The JIT VM, when invoked, loops around a set of pre-defined instructions until
+it either runs of gas, causes an internal error, returns or stops. At a later
+stage the JIT VM will see some additional features that will cause sets of
+instructions to be compiled down to segments. Segments are sets of instructions
+that can be run in one go saving precious time during execution.
+*/
+package vm

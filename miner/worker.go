@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/logger"
@@ -99,7 +100,7 @@ type worker struct {
 	pow    pow.PoW
 
 	eth     core.Backend
-	chain   *core.ChainManager
+	chain   *core.BlockChain
 	proc    *core.BlockProcessor
 	chainDb ethdb.Database
 
@@ -130,7 +131,7 @@ func newWorker(coinbase common.Address, eth core.Backend) *worker {
 		chainDb:        eth.ChainDb(),
 		recv:           make(chan *Result, resultQueueSize),
 		gasPrice:       new(big.Int),
-		chain:          eth.ChainManager(),
+		chain:          eth.BlockChain(),
 		proc:           eth.BlockProcessor(),
 		possibleUncles: make(map[common.Hash]*types.Block),
 		coinbase:       coinbase,
@@ -266,7 +267,6 @@ func (self *worker) wait() {
 			block := result.Block
 			work := result.Work
 
-			work.state.Sync()
 			if self.fullValidation {
 				if _, err := self.chain.InsertChain(types.Blocks{block}); err != nil {
 					glog.V(logger.Error).Infoln("mining err", err)
@@ -274,6 +274,7 @@ func (self *worker) wait() {
 				}
 				go self.mux.Post(core.NewMinedBlockEvent{block})
 			} else {
+				work.state.Commit()
 				parent := self.chain.GetBlock(block.ParentHash())
 				if parent == nil {
 					glog.V(logger.Error).Infoln("Invalid block found during mining")
@@ -298,7 +299,7 @@ func (self *worker) wait() {
 				}
 
 				// broadcast before waiting for validation
-				go func(block *types.Block, logs state.Logs, receipts []*types.Receipt) {
+				go func(block *types.Block, logs vm.Logs, receipts []*types.Receipt) {
 					self.mux.Post(core.NewMinedBlockEvent{block})
 					self.mux.Post(core.ChainEvent{block, block.Hash(), logs})
 					if stat == core.CanonStatTy {
@@ -528,8 +529,7 @@ func (self *worker) commitNewWork() {
 	if atomic.LoadInt32(&self.mining) == 1 {
 		// commit state root after all state transitions.
 		core.AccumulateRewards(work.state, header, uncles)
-		work.state.SyncObjects()
-		header.Root = work.state.Root()
+		header.Root = work.state.IntermediateRoot()
 	}
 
 	// create the new block whose nonce will be mined.
