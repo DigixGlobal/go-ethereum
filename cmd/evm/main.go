@@ -113,7 +113,7 @@ func run(ctx *cli.Context) {
 	glog.SetV(ctx.GlobalInt(VerbosityFlag.Name))
 
 	db, _ := ethdb.NewMemDatabase()
-	statedb := state.New(common.Hash{}, db)
+	statedb, _ := state.New(common.Hash{}, db)
 	sender := statedb.CreateAccount(common.StringToAddress("sender"))
 	receiver := statedb.CreateAccount(common.StringToAddress("receiver"))
 	receiver.SetCode(common.Hex2Bytes(ctx.GlobalString(CodeFlag.Name)))
@@ -217,8 +217,8 @@ func (self *VMEnv) AddLog(log *vm.Log) {
 func (self *VMEnv) CanTransfer(from common.Address, balance *big.Int) bool {
 	return self.state.GetBalance(from).Cmp(balance) >= 0
 }
-func (self *VMEnv) Transfer(from, to vm.Account, amount *big.Int) error {
-	return core.Transfer(from, to, amount)
+func (self *VMEnv) Transfer(from, to vm.Account, amount *big.Int) {
+	core.Transfer(from, to, amount)
 }
 
 func (self *VMEnv) Call(caller vm.ContractRef, addr common.Address, data []byte, gas, price, value *big.Int) ([]byte, error) {

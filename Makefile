@@ -6,7 +6,7 @@
 GOBIN = build/bin
 
 geth:
-	build/env.sh go install -v $(shell build/ldflags.sh) ./cmd/geth
+	build/env.sh go install -v $(shell build/flags.sh) ./cmd/geth
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/geth\" to launch geth."
 
@@ -56,11 +56,14 @@ ethtest:
 
 bootnode:
 	build/env.sh go install -v $(shell build/ldflags.sh) ./cmd/bootnode
+
+mist:
+	build/env.sh go install -v $(shell build/flags.sh) ./cmd/mist
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/bootnode\" to launch bootnode."
 
 all:
-	build/env.sh go install -v $(shell build/ldflags.sh) ./...
+	build/env.sh go install -v $(shell build/flags.sh) ./...
 
 test: all
 	build/env.sh go test ./...

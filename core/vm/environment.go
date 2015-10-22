@@ -39,7 +39,7 @@ type Environment interface {
 	// The block number this VM is invoken on
 	BlockNumber() *big.Int
 	// The n'th hash ago from this block number
-	GetHash(n uint64) common.Hash
+	GetHash(uint64) common.Hash
 	// The handler's address
 	Coinbase() common.Address
 	// The current time (block time)
@@ -51,7 +51,7 @@ type Environment interface {
 	// Determines whether it's possible to transact
 	CanTransfer(from common.Address, balance *big.Int) bool
 	// Transfers amount from one account to the other
-	Transfer(from, to Account, amount *big.Int) error
+	Transfer(from, to Account, amount *big.Int)
 	// Adds a LOG to the state
 	AddLog(*Log)
 	// Adds a structured log to the env

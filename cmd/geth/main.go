@@ -107,6 +107,22 @@ Regular users do not need to execute it.
 `,
 		},
 		{
+			Action: gpuinfo,
+			Name:   "gpuinfo",
+			Usage:  "gpuinfo",
+			Description: `
+Prints OpenCL device info for all found GPUs.
+`,
+		},
+		{
+			Action: gpubench,
+			Name:   "gpubench",
+			Usage:  "benchmark GPU",
+			Description: `
+Runs quick benchmark on first GPU found.
+`,
+		},
+		{
 			Action: version,
 			Name:   "version",
 			Usage:  "print ethereum version numbers",
@@ -288,7 +304,7 @@ JavaScript API. See https://github.com/ethereum/go-ethereum/wiki/Javascipt-Conso
 		utils.DataDirFlag,
 		utils.BlockchainVersionFlag,
 		utils.OlympicFlag,
-		utils.EthVersionFlag,
+		utils.FastSyncFlag,
 		utils.CacheFlag,
 		utils.JSpathFlag,
 		utils.ListenPortFlag,
@@ -298,6 +314,7 @@ JavaScript API. See https://github.com/ethereum/go-ethereum/wiki/Javascipt-Conso
 		utils.GasPriceFlag,
 		utils.MinerThreadsFlag,
 		utils.MiningEnabledFlag,
+		utils.MiningGPUFlag,
 		utils.AutoDAGFlag,
 		utils.NATFlag,
 		utils.NatspecEnabledFlag,
@@ -314,6 +331,7 @@ JavaScript API. See https://github.com/ethereum/go-ethereum/wiki/Javascipt-Conso
 		utils.ExecFlag,
 		utils.WhisperEnabledFlag,
 		utils.DevModeFlag,
+		utils.TestNetFlag,
 		utils.VMDebugFlag,
 		utils.VMForceJitFlag,
 		utils.VMJitCacheFlag,
@@ -340,8 +358,8 @@ JavaScript API. See https://github.com/ethereum/go-ethereum/wiki/Javascipt-Conso
 	}
 	app.Before = func(ctx *cli.Context) error {
 		utils.SetupLogger(ctx)
+		utils.SetupNetwork(ctx)
 		utils.SetupVM(ctx)
-		utils.SetupEth(ctx)
 		if ctx.GlobalBool(utils.PProfEanbledFlag.Name) {
 			utils.StartPProf(ctx)
 		}
@@ -391,9 +409,6 @@ func makeDefaultExtra() []byte {
 
 func run(ctx *cli.Context) {
 	utils.CheckLegalese(utils.MustDataDir(ctx))
-	if ctx.GlobalBool(utils.OlympicFlag.Name) {
-		utils.InitOlympic()
-	}
 
 	cfg := utils.MakeEthConfig(ClientIdentifier, nodeNameVersion, ctx)
 	cfg.ExtraData = makeExtra(ctx)
@@ -429,6 +444,7 @@ func attach(ctx *cli.Context) {
 	repl := newLightweightJSRE(
 		ctx.GlobalString(utils.JSpathFlag.Name),
 		client,
+		ctx.GlobalString(utils.DataDirFlag.Name),
 		true,
 	)
 
@@ -586,7 +602,10 @@ func startEth(ctx *cli.Context, eth *eth.Ethereum) {
 		}
 	}
 	if ctx.GlobalBool(utils.MiningEnabledFlag.Name) {
-		if err := eth.StartMining(ctx.GlobalInt(utils.MinerThreadsFlag.Name)); err != nil {
+		err := eth.StartMining(
+			ctx.GlobalInt(utils.MinerThreadsFlag.Name),
+			ctx.GlobalString(utils.MiningGPUFlag.Name))
+		if err != nil {
 			utils.Fatalf("%v", err)
 		}
 	}
@@ -735,6 +754,29 @@ func makedag(ctx *cli.Context) {
 			fmt.Println("making DAG, this could take awhile...")
 			ethash.MakeDAG(blockNum, dir)
 		}
+	default:
+		wrongArgs()
+	}
+}
+
+func gpuinfo(ctx *cli.Context) {
+	eth.PrintOpenCLDevices()
+}
+
+func gpubench(ctx *cli.Context) {
+	args := ctx.Args()
+	wrongArgs := func() {
+		utils.Fatalf(`Usage: geth gpubench <gpu number>`)
+	}
+	switch {
+	case len(args) == 1:
+		n, err := strconv.ParseUint(args[0], 0, 64)
+		if err != nil {
+			wrongArgs()
+		}
+		eth.GPUBench(n)
+	case len(args) == 0:
+		eth.GPUBench(0)
 	default:
 		wrongArgs()
 	}

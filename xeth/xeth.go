@@ -126,7 +126,11 @@ func New(ethereum *eth.Ethereum, frontend Frontend) *XEth {
 	if frontend == nil {
 		xeth.frontend = dummyFrontend{}
 	}
-	xeth.state = NewState(xeth, xeth.backend.BlockChain().State())
+	state, err := xeth.backend.BlockChain().State()
+	if err != nil {
+		return nil
+	}
+	xeth.state = NewState(xeth, state)
 
 	go xeth.start()
 
@@ -207,14 +211,21 @@ func (self *XEth) RemoteMining() *miner.RemoteAgent { return self.agent }
 
 func (self *XEth) AtStateNum(num int64) *XEth {
 	var st *state.StateDB
+	var err error
 	switch num {
 	case -2:
 		st = self.backend.Miner().PendingState().Copy()
 	default:
 		if block := self.getBlockByHeight(num); block != nil {
-			st = state.New(block.Root(), self.backend.ChainDb())
+			st, err = state.New(block.Root(), self.backend.ChainDb())
+			if err != nil {
+				return nil
+			}
 		} else {
-			st = state.New(self.backend.BlockChain().GetBlockByNumber(0).Root(), self.backend.ChainDb())
+			st, err = state.New(self.backend.BlockChain().GetBlockByNumber(0).Root(), self.backend.ChainDb())
+			if err != nil {
+				return nil
+			}
 		}
 	}
 
@@ -244,30 +255,41 @@ func (self *XEth) State() *State { return self.state }
 func (self *XEth) UpdateState() (wait chan *big.Int) {
 	wait = make(chan *big.Int)
 	go func() {
-		sub := self.backend.EventMux().Subscribe(core.ChainHeadEvent{})
+		eventSub := self.backend.EventMux().Subscribe(core.ChainHeadEvent{})
+		defer eventSub.Unsubscribe()
+
 		var m, n *big.Int
 		var ok bool
-	out:
+
+		eventCh := eventSub.Chan()
 		for {
 			select {
-			case event := <-sub.Chan():
-				ev, ok := event.(core.ChainHeadEvent)
-				if ok {
-					m = ev.Block.Number()
+			case event, ok := <-eventCh:
+				if !ok {
+					// Event subscription closed, set the channel to nil to stop spinning
+					eventCh = nil
+					continue
+				}
+				// A real event arrived, process if new head block assignment
+				if event, ok := event.Data.(core.ChainHeadEvent); ok {
+					m = event.Block.Number()
 					if n != nil && n.Cmp(m) < 0 {
 						wait <- n
 						n = nil
 					}
-					statedb := state.New(ev.Block.Root(), self.backend.ChainDb())
+					statedb, err := state.New(event.Block.Root(), self.backend.ChainDb())
+					if err != nil {
+						glog.V(logger.Error).Infoln("Could not create new state: %v", err)
+						return
+					}
 					self.state = NewState(self, statedb)
 				}
 			case n, ok = <-wait:
 				if !ok {
-					break out
+					return
 				}
 			}
 		}
-		sub.Unsubscribe()
 	}()
 	return
 }
@@ -452,7 +474,7 @@ func (self *XEth) ClientVersion() string {
 func (self *XEth) SetMining(shouldmine bool, threads int) bool {
 	ismining := self.backend.IsMining()
 	if shouldmine && !ismining {
-		err := self.backend.StartMining(threads)
+		err := self.backend.StartMining(threads, "")
 		return err == nil
 	}
 	if ismining && !shouldmine {
@@ -536,11 +558,9 @@ func (self *XEth) NewLogFilter(earliest, latest int64, skip, max int, address []
 	id := self.filterManager.Add(filter)
 	self.logQueue[id] = &logQueue{timeout: time.Now()}
 
-	filter.SetEarliestBlock(earliest)
-	filter.SetLatestBlock(latest)
-	filter.SetSkip(skip)
-	filter.SetMax(max)
-	filter.SetAddress(cAddress(address))
+	filter.SetBeginBlock(earliest)
+	filter.SetEndBlock(latest)
+	filter.SetAddresses(cAddress(address))
 	filter.SetTopics(cTopics(topics))
 	filter.LogsCallback = func(logs vm.Logs) {
 		self.logMu.Lock()
@@ -645,11 +665,9 @@ func (self *XEth) Logs(id int) vm.Logs {
 
 func (self *XEth) AllLogs(earliest, latest int64, skip, max int, address []string, topics [][]string) vm.Logs {
 	filter := filters.New(self.backend.ChainDb())
-	filter.SetEarliestBlock(earliest)
-	filter.SetLatestBlock(latest)
-	filter.SetSkip(skip)
-	filter.SetMax(max)
-	filter.SetAddress(cAddress(address))
+	filter.SetBeginBlock(earliest)
+	filter.SetEndBlock(latest)
+	filter.SetAddresses(cAddress(address))
 	filter.SetTopics(cTopics(topics))
 
 	return filter.Find()
@@ -832,7 +850,6 @@ func (self *XEth) Call(fromStr, toStr, valueStr, gasStr, gasPriceStr, dataStr st
 	}
 
 	from.SetBalance(common.MaxBig)
-	from.SetGasLimit(common.MaxBig)
 
 	msg := callmsg{
 		from:     from,
@@ -856,8 +873,8 @@ func (self *XEth) Call(fromStr, toStr, valueStr, gasStr, gasPriceStr, dataStr st
 
 	header := self.CurrentBlock().Header()
 	vmenv := core.NewEnv(statedb, self.backend.BlockChain(), msg, header)
-
-	res, gas, err := core.ApplyMessage(vmenv, msg, from)
+	gp := new(core.GasPool).AddGas(common.MaxBig)
+	res, gas, err := core.ApplyMessage(vmenv, msg, gp)
 	return common.ToHex(res), gas.String(), err
 }
 

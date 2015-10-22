@@ -59,8 +59,10 @@ func (self *VMEnv) SetDepth(i int)           { self.depth = i }
 func (self *VMEnv) VmType() vm.Type          { return self.typ }
 func (self *VMEnv) SetVmType(t vm.Type)      { self.typ = t }
 func (self *VMEnv) GetHash(n uint64) common.Hash {
-	if block := self.chain.GetBlockByNumber(n); block != nil {
-		return block.Hash()
+	for block := self.chain.GetBlock(self.header.ParentHash); block != nil; block = self.chain.GetBlock(block.ParentHash()) {
+		if block.NumberU64() == n {
+			return block.Hash()
+		}
 	}
 
 	return common.Hash{}
@@ -81,8 +83,8 @@ func (self *VMEnv) SetSnapshot(copy vm.Database) {
 	self.state.Set(copy.(*state.StateDB))
 }
 
-func (self *VMEnv) Transfer(from, to vm.Account, amount *big.Int) error {
-	return Transfer(from, to, amount)
+func (self *VMEnv) Transfer(from, to vm.Account, amount *big.Int) {
+	Transfer(from, to, amount)
 }
 
 func (self *VMEnv) Call(me vm.ContractRef, addr common.Address, data []byte, gas, price, value *big.Int) ([]byte, error) {
